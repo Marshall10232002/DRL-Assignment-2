@@ -1,29 +1,28 @@
-# Remember to adjust your student ID in meta.xml
-import numpy as np
-import pickle
-import random
-import gym
-from gym import spaces
-import matplotlib.pyplot as plt
 import copy
 import random
 import math
+import numpy as np
+import pickle
+import time
+import matplotlib.pyplot as plt
+from collections import defaultdict
+import gym
+from gym import spaces
 
+# ------------------------------
+# Game2048 Environment
+# ------------------------------
 
 class Game2048Env(gym.Env):
     def __init__(self):
         super(Game2048Env, self).__init__()
-
         self.size = 4  # 4x4 2048 board
         self.board = np.zeros((self.size, self.size), dtype=int)
         self.score = 0
-
         # Action space: 0: up, 1: down, 2: left, 3: right
         self.action_space = spaces.Discrete(4)
         self.actions = ["up", "down", "left", "right"]
-
         self.last_move_valid = True  # Record if the last move was valid
-
         self.reset()
 
     def reset(self):
@@ -44,7 +43,7 @@ class Game2048Env(gym.Env):
     def compress(self, row):
         """Compress the row: move non-zero values to the left"""
         new_row = row[row != 0]  # Remove zeros
-        new_row = np.pad(new_row, (0, self.size - len(new_row)), mode='constant')  # Pad with zeros on the right
+        new_row = np.pad(new_row, (0, self.size - len(new_row)), mode='constant')
         return new_row
 
     def merge(self, row):
@@ -74,7 +73,6 @@ class Game2048Env(gym.Env):
         moved = False
         for i in range(self.size):
             original_row = self.board[i].copy()
-            # Reverse the row, compress, merge, compress, then reverse back
             reversed_row = self.board[i][::-1]
             reversed_row = self.compress(reversed_row)
             reversed_row = self.merge(reversed_row)
@@ -102,7 +100,6 @@ class Game2048Env(gym.Env):
         moved = False
         for j in range(self.size):
             original_col = self.board[:, j].copy()
-            # Reverse the column, compress, merge, compress, then reverse back
             reversed_col = self.board[:, j][::-1]
             reversed_col = self.compress(reversed_col)
             reversed_col = self.merge(reversed_col)
@@ -114,28 +111,21 @@ class Game2048Env(gym.Env):
 
     def is_game_over(self):
         """Check if there are no legal moves left"""
-        # If there is any empty cell, the game is not over
         if np.any(self.board == 0):
             return False
-
-        # Check horizontally
         for i in range(self.size):
             for j in range(self.size - 1):
                 if self.board[i, j] == self.board[i, j+1]:
                     return False
-
-        # Check vertically
         for j in range(self.size):
             for i in range(self.size - 1):
                 if self.board[i, j] == self.board[i+1, j]:
                     return False
-
         return True
 
     def step(self, action):
         """Execute one action"""
         assert self.action_space.contains(action), "Invalid action"
-
         if action == 0:
             moved = self.move_up()
         elif action == 1:
@@ -146,35 +136,30 @@ class Game2048Env(gym.Env):
             moved = self.move_right()
         else:
             moved = False
-
-        self.last_move_valid = moved  # Record if the move was valid
-
+        self.last_move_valid = moved
         if moved:
             self.add_random_tile()
-
         done = self.is_game_over()
-
         return self.board, self.score, done, {}
 
     def render(self, mode="human", action=None):
-        """
-        Render the current board using Matplotlib.
-        This function does not check if the action is valid and only displays the current board state.
-        """
+        """Render the current board using Matplotlib"""
         fig, ax = plt.subplots(figsize=(4, 4))
         ax.set_xticks([])
         ax.set_yticks([])
         ax.set_xlim(-0.5, self.size - 0.5)
         ax.set_ylim(-0.5, self.size - 0.5)
-
+        COLOR_MAP = {0:"#cdc1b4", 2:"#eee4da", 4:"#ede0c8", 8:"#f2b179", 16:"#f59563",
+                     32:"#f67c5f", 64:"#f65e3b", 128:"#edcf72", 256:"#edcc61", 512:"#edc850",
+                     1024:"#edc53f", 2048:"#edc22e"}
+        TEXT_COLOR = {2:"black", 4:"black"}
         for i in range(self.size):
             for j in range(self.size):
                 value = self.board[i, j]
-                color = COLOR_MAP.get(value, "#3c3a32")  # Default dark color
+                color = COLOR_MAP.get(value, "#3c3a32")
                 text_color = TEXT_COLOR.get(value, "white")
                 rect = plt.Rectangle((j - 0.5, i - 0.5), 1, 1, facecolor=color, edgecolor="black")
                 ax.add_patch(rect)
-
                 if value != 0:
                     ax.text(j, i, str(value), ha='center', va='center',
                             fontsize=16, fontweight='bold', color=text_color)
@@ -187,54 +172,201 @@ class Game2048Env(gym.Env):
 
     def simulate_row_move(self, row):
         """Simulate a left move for a single row"""
-        # Compress: move non-zero numbers to the left
         new_row = row[row != 0]
         new_row = np.pad(new_row, (0, self.size - len(new_row)), mode='constant')
-        # Merge: merge adjacent equal numbers (do not update score)
         for i in range(len(new_row) - 1):
             if new_row[i] == new_row[i + 1] and new_row[i] != 0:
                 new_row[i] *= 2
                 new_row[i + 1] = 0
-        # Compress again
         new_row = new_row[new_row != 0]
         new_row = np.pad(new_row, (0, self.size - len(new_row)), mode='constant')
         return new_row
 
     def is_move_legal(self, action):
         """Check if the specified move is legal (i.e., changes the board)"""
-        # Create a copy of the current board state
         temp_board = self.board.copy()
-
-        if action == 0:  # Move up
+        if action == 0:
             for j in range(self.size):
                 col = temp_board[:, j]
                 new_col = self.simulate_row_move(col)
                 temp_board[:, j] = new_col
-        elif action == 1:  # Move down
+        elif action == 1:
             for j in range(self.size):
-                # Reverse the column, simulate, then reverse back
                 col = temp_board[:, j][::-1]
                 new_col = self.simulate_row_move(col)
                 temp_board[:, j] = new_col[::-1]
-        elif action == 2:  # Move left
+        elif action == 2:
             for i in range(self.size):
                 row = temp_board[i]
                 temp_board[i] = self.simulate_row_move(row)
-        elif action == 3:  # Move right
+        elif action == 3:
             for i in range(self.size):
                 row = temp_board[i][::-1]
                 new_row = self.simulate_row_move(row)
                 temp_board[i] = new_row[::-1]
         else:
             raise ValueError("Invalid action")
-
-        # If the simulated board is different from the current board, the move is legal
         return not np.array_equal(self.board, temp_board)
 
-def get_action(state, score):
-    env = Game2048Env()
-    return random.choice([0, 1, 2, 3]) # Choose a random action
+# ------------------------------
+# TD & Afterstate Functions and Approximator Setup
+# ------------------------------
+
+def get_afterstate(env, action):
+    """
+    Simulate the move (without adding a random tile) and return the afterstate.
+    """
+    env_copy = copy.deepcopy(env)
+    if action == 0:
+        env_copy.move_up()
+    elif action == 1:
+        env_copy.move_down()
+    elif action == 2:
+        env_copy.move_left()
+    elif action == 3:
+        env_copy.move_right()
+    return env_copy.board.copy(), env_copy.score, True
+
+def get_current_stage(board, max_stage=100):
+    """
+    Determine stage based on maximum tile.
+    """
+    max_tile = np.max(board)
+    if max_tile < 1024:
+        return 1
+    elif max_tile < 2048:
+        return 2
+    elif max_tile < 4096:
+        if np.any(board == 1024):
+            return 4
+        else:
+            return 3
+    else:
+        return 5
+
+# NTupleApproximator class is the same as defined above.
+
+# Define your n-tuple patterns
+patterns = [
+    [(0,0), (1,0), (2,0), (3,0)],
+    [(1,0), (1,1), (1,2), (1,3)],
+    [(0,0), (0,1), (0,1), (1,1)],
+    [(1,0), (1,1), (2,0), (2,1)],
+    [(1,1), (1,2), (2,1), (2,2)],
+    [(0,0), (0,1), (0,2), (0,3), (1,0), (1,1)],
+    [(1,0), (1,1), (1,2), (1,3), (2,0), (2,1)],
+    [(0,0), (0,1), (0,2), (1,0), (1,1), (1,2)],
+    [(1,0), (1,1), (1,2), (2,0), (2,1), (2,2)]
+]
+
+# Load stage weights for stages 1–5
+all_saved_weights = []  # all_saved_weights[0] corresponds to stage 1, etc.
+num_stages = 5
+for stage in range(1, num_stages + 1):
+    filename = f"stage{stage}_weights.pkl"
+    try:
+        with open(filename, "rb") as f:
+            weights = pickle.load(f)
+        all_saved_weights.append(weights)
+        print(f"Loaded weights for stage {stage} from {filename}.")
+    except FileNotFoundError:
+        print(f"Could not find {filename}. Using empty weights for stage {stage}.")
+        empty_weights = [defaultdict(float) for _ in patterns]
+        all_saved_weights.append(empty_weights)
+
+def rollout_td(sim_env, approximator, rollout_depth=5, gamma=0.99):
+    """
+    Rollout from the current simulation environment using a TD (greedy) policy.
+    At each step, for each legal action, compute its afterstate (using get_afterstate)
+    to obtain the immediate reward and the approximator's estimated value.
+    If the afterstate indicates a stage transition, use the corresponding weights.
+    Select the action that yields the highest (immediate reward + discounted value),
+    execute it via sim_env.step (which applies the random tile addition), and accumulate
+    the discounted reward.
+    """
+    total_rollout = 0.0
+    discount = 1.0
+    depth = 0
+    current_stage = get_current_stage(sim_env.board, max_stage=100)
     
-    # You can submit this random agent to evaluate the performance of a purely random strategy.
+    while depth < rollout_depth and not sim_env.is_game_over():
+        legal_actions = [a for a in range(4) if sim_env.is_move_legal(a)]
+        if not legal_actions:
+            break
+        
+        best_action = None
+        best_estimate = -float('inf')
+        
+        for action in legal_actions:
+            board_after, score_after, _ = get_afterstate(sim_env, action)
+            immediate_reward = score_after - sim_env.score
+            new_stage = get_current_stage(board_after, max_stage=100)
+            if new_stage != current_stage:
+                temp_approx = NTupleApproximator(sim_env.board.shape[0], patterns, weights=all_saved_weights[new_stage - 1])
+                value_est = immediate_reward + gamma * temp_approx.value(board_after)
+            else:
+                value_est = immediate_reward + gamma * approximator.value(board_after)
+            if value_est > best_estimate:
+                best_estimate = value_est
+                best_action = action
+        
+        prev_score = sim_env.score
+        sim_env.step(best_action)
+        r = sim_env.score - prev_score
+        total_rollout += discount * r
+        discount *= gamma
+        depth += 1
+        current_stage = get_current_stage(sim_env.board, max_stage=100)
+    
+    if not sim_env.is_game_over():
+        total_rollout += discount * approximator.value(sim_env.board)
+    return total_rollout
 
+def simulate_action(action, env, approximator, rollout_depth=5, gamma=0.99, num_simulations=20):
+    """
+    For a given action from the current state, simulate multiple playouts using rollout_td.
+    Return the average return (immediate reward plus rollout reward).
+    """
+    rewards = []
+    for _ in range(num_simulations):
+        sim_env = copy.deepcopy(env)
+        prev_score = sim_env.score
+        sim_env.step(action)
+        immediate_reward = sim_env.score - prev_score
+        rollout_reward = rollout_td(sim_env, approximator, rollout_depth, gamma)
+        rewards.append(immediate_reward + rollout_reward)
+    return np.mean(rewards)
 
+def get_action(state, score):
+    """
+    Given the current state (board) and score, select an action using TD-MCTS simulation.
+    This function creates a temporary environment, sets its board and score,
+    runs multiple simulations for each legal move using simulate_action,
+    and returns the action with the highest estimated return.
+    """
+    # Create a temporary environment with the given state and score.
+    env = Game2048Env()
+    env.board = np.copy(state)
+    env.score = score
+    
+    # Initialize the approximator with stage 1 weights.
+    approximator = NTupleApproximator(board_size=4, patterns=patterns)
+    approximator.weights = all_saved_weights[0]
+    
+    legal_actions = [a for a in range(4) if env.is_move_legal(a)]
+    if not legal_actions:
+        return random.choice([0, 1, 2, 3])
+    
+    action_values = {}
+    for action in legal_actions:
+        value_estimate = simulate_action(action, env, approximator, rollout_depth=5, gamma=0.99, num_simulations=20)
+        action_values[action] = value_estimate
+    best_action = max(action_values, key=action_values.get)
+    return best_action
+
+# ------------------------------
+# Random agent for baseline (if needed)
+# ------------------------------
+
+def get_action_random(state, score):
+    return random.choice([0, 1, 2, 3])
