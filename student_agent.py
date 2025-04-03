@@ -253,30 +253,50 @@ class NTupleApproximator:
         if weights is not None:
             self.weights = weights  # a list of dicts for each pattern
         else:
+            from collections import defaultdict
             self.weights = [defaultdict(float) for _ in patterns]
+
+        # Precompute symmetry transformations for each pattern.
         self.symmetry_patterns = []
         for pattern in self.patterns:
             syms = self.generate_symmetries(pattern)
             self.symmetry_patterns.append(syms)
+
     def generate_symmetries(self, pattern):
-        funcs = [lambda x: identity(x, self.board_size),
-                 lambda x: rot90(x, self.board_size),
-                 lambda x: rot180(x, self.board_size),
-                 lambda x: rot270(x, self.board_size),
-                 lambda x: reflect(x, self.board_size),
-                 lambda x: rot90(reflect(x, self.board_size), self.board_size),
-                 lambda x: rot180(reflect(x, self.board_size), self.board_size),
-                 lambda x: rot270(reflect(x, self.board_size), self.board_size)]
+        def identity(coords, board_size):
+            return coords
+        def rot90(coords, board_size):
+            return [(j, board_size - 1 - i) for (i, j) in coords]
+        def rot180(coords, board_size):
+            return [(board_size - 1 - i, board_size - 1 - j) for (i, j) in coords]
+        def rot270(coords, board_size):
+            return [(board_size - 1 - j, i) for (i, j) in coords]
+        def reflect(coords, board_size):
+            return [(i, board_size - 1 - j) for (i, j) in coords]
+
+        funcs = [
+            lambda x: identity(x, self.board_size),
+            lambda x: rot90(x, self.board_size),
+            lambda x: rot180(x, self.board_size),
+            lambda x: rot270(x, self.board_size),
+            lambda x: reflect(x, self.board_size),
+            lambda x: rot90(reflect(x, self.board_size), self.board_size),
+            lambda x: rot180(reflect(x, self.board_size), self.board_size),
+            lambda x: rot270(reflect(x, self.board_size), self.board_size)
+        ]
         syms = []
         for f in funcs:
             transformed = f(pattern)
             if transformed not in syms:
                 syms.append(transformed)
         return syms
+
     def tile_to_index(self, tile):
-        return 0 if tile == 0 else int(math.log(tile,2))
+        return 0 if tile == 0 else int(math.log(tile, 2))
+
     def get_feature(self, board, coords):
-        return tuple(self.tile_to_index(board[i,j]) for (i,j) in coords)
+        return tuple(self.tile_to_index(board[i, j]) for (i, j) in coords)
+
     def value(self, board):
         total = 0.0
         for weight_dict, sym_group in zip(self.weights, self.symmetry_patterns):
@@ -286,6 +306,7 @@ class NTupleApproximator:
                 group_val += weight_dict[feature]
             total += group_val / len(sym_group)
         return total
+
     def update(self, board, delta, alpha):
         for weight_dict, sym_group in zip(self.weights, self.symmetry_patterns):
             for pattern in sym_group:
