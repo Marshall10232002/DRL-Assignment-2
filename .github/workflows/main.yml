@@ -31,11 +31,11 @@ jobs:
 
     - name: 4. Download weights.pkl from Google Drive
       run: |
-        gdown 'https://drive.google.com/file/d/1OolRvfUON-Fmfo6AJu09PnY1KNt3s2CI/view?usp=share_link' #stage 1
-        gdown 'https://drive.google.com/file/d/1l1OV3CvhnoGjlgfOQvfzuyLsYfFUedXb/view?usp=share_link' #stage 3
-        gdown 'https://drive.google.com/file/d/163zW-1CTB2HhzgZY_rVRszwhD0HIQs5m/view?usp=sharing' #stage 2
-        gdown 'https://drive.google.com/file/d/1yoUM2FqHfGuJbSS9BYmRh4vnWCajXW35/view?usp=sharing' #stage 4
-        gdown 'https://drive.google.com/file/d/1N_XEXrEue4njN_zWhLuM3EhUOkUX0nTM/view?usp=share_link' #stage 5
+        gdown --fuzzy 'https://drive.google.com/file/d/1OolRvfUON-Fmfo6AJu09PnY1KNt3s2CI/view?usp=share_link' #stage 1
+        gdown --fuzzy 'https://drive.google.com/file/d/1l1OV3CvhnoGjlgfOQvfzuyLsYfFUedXb/view?usp=share_link' #stage 3
+        gdown --fuzzy 'https://drive.google.com/file/d/163zW-1CTB2HhzgZY_rVRszwhD0HIQs5m/view?usp=sharing' #stage 2
+        gdown --fuzzy 'https://drive.google.com/file/d/1yoUM2FqHfGuJbSS9BYmRh4vnWCajXW35/view?usp=sharing' #stage 4
+        gdown --fuzzy 'https://drive.google.com/file/d/1N_XEXrEue4njN_zWhLuM3EhUOkUX0nTM/view?usp=share_link' #stage 5
 
     - name: 5. Ensure env.so is executable
       run: chmod +x env.cpython-38-x86_64-linux-gnu.so
