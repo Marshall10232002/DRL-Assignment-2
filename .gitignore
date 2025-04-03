@@ -8,3 +8,4 @@ __pycache__/
 # ignore eval.py
 eval.py
 stage1_weights.pkl
+*.pkl
