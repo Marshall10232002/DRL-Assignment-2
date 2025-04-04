@@ -429,7 +429,6 @@ def get_action(state, score):
         value_estimate = simulate_action(action, env, approximator, rollout_depth=5, gamma=0.99, num_simulations=20)
         action_values[action] = value_estimate
     best_action = max(action_values, key=action_values.get)
-    print(best_action)
     return best_action
 
 # ------------------------------
