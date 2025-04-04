@@ -433,6 +433,8 @@ def simulate_action(action, env, approximator, rollout_depth=5, gamma=0.99, num_
         rewards.append(immediate_reward + rollout_reward)
     return np.mean(rewards)
 
+init_model()
+
 # ------------------------------
 # Main decision function (per TA suggestion)
 # ------------------------------
