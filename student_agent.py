@@ -325,7 +325,7 @@ patterns = [
     [(0,0), (0,1), (0,2), (1,0), (1,1), (1,2)],
     [(1,0), (1,1), (1,2), (2,0), (2,1), (2,2)]
 ]
-
+print("start")
 # Load stage weights for stages 1–5
 all_saved_weights = []  # all_saved_weights[0] corresponds to stage 1, etc.
 num_stages = 5
