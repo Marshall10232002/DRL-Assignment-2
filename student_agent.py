@@ -8,18 +8,11 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 import gym
 from gym import spaces
-import gc  # For garbage collection
-
-# ------------------------------
-# Global variables for approximator and saved weights
-# ------------------------------
-approximator = None
-all_saved_weights = None
-num_stages = 5
 
 # ------------------------------
 # Game2048 Environment
 # ------------------------------
+
 class Game2048Env(gym.Env):
     def __init__(self):
         super(Game2048Env, self).__init__()
@@ -216,23 +209,9 @@ class Game2048Env(gym.Env):
         return not np.array_equal(self.board, temp_board)
 
 # ------------------------------
-# Define your n-tuple patterns globally
+# TD & Afterstate Functions and Approximator Setup
 # ------------------------------
-patterns = [
-    [(0,0), (1,0), (2,0), (3,0)],
-    [(1,0), (1,1), (1,2), (1,3)],
-    [(0,0), (0,1), (0,1), (1,1)],
-    [(1,0), (1,1), (2,0), (2,1)],
-    [(1,1), (1,2), (2,1), (2,2)],
-    [(0,0), (0,1), (0,2), (0,3), (1,0), (1,1)],
-    [(1,0), (1,1), (1,2), (1,3), (2,0), (2,1)],
-    [(0,0), (0,1), (0,2), (1,0), (1,1), (1,2)],
-    [(1,0), (1,1), (1,2), (2,0), (2,1), (2,2)]
-]
 
-# ------------------------------
-# TD & Afterstate Functions
-# ------------------------------
 def get_afterstate(env, action):
     """
     Simulate the move (without adding a random tile) and return the afterstate.
@@ -265,9 +244,8 @@ def get_current_stage(board, max_stage=100):
     else:
         return 5
 
-# ------------------------------
-# N-Tuple Approximator
-# ------------------------------
+
+# --- NTupleApproximator ---
 class NTupleApproximator:
     def __init__(self, board_size, patterns, weights=None):
         self.board_size = board_size
@@ -335,46 +313,43 @@ class NTupleApproximator:
                 feature = self.get_feature(board, pattern)
                 weight_dict[feature] += (alpha * delta) / len(sym_group)
 
-# ------------------------------
-# Initialize Model (per TA suggestion)
-# ------------------------------
-def init_model():
-    """
-    Initialize global approximator and load all stage weights. 
-    This function can be called once at program start. 
-    """
-    global approximator, all_saved_weights
-    gc.collect()  # Clean up memory
+# Define your n-tuple patterns
+patterns = [
+    [(0,0), (1,0), (2,0), (3,0)],
+    [(1,0), (1,1), (1,2), (1,3)],
+    [(0,0), (0,1), (0,1), (1,1)],
+    [(1,0), (1,1), (2,0), (2,1)],
+    [(1,1), (1,2), (2,1), (2,2)],
+    [(0,0), (0,1), (0,2), (0,3), (1,0), (1,1)],
+    [(1,0), (1,1), (1,2), (1,3), (2,0), (2,1)],
+    [(0,0), (0,1), (0,2), (1,0), (1,1), (1,2)],
+    [(1,0), (1,1), (1,2), (2,0), (2,1), (2,2)]
+]
 
-    # Load stage weights for stages 1–5
-    loaded_weights = []
-    for stage in range(1, num_stages + 1):
-        filename = f"stage{stage}_weights.pkl"
-        try:
-            with open(filename, "rb") as f:
-                weights = pickle.load(f)
-            loaded_weights.append(weights)
-            print(f"Loaded weights for stage {stage} from {filename}.")
-        except FileNotFoundError:
-            print(f"Could not find {filename}. Using empty weights for stage {stage}.")
-            empty_weights = [defaultdict(float) for _ in patterns]
-            loaded_weights.append(empty_weights)
+# Load stage weights for stages 1–5
+all_saved_weights = []  # all_saved_weights[0] corresponds to stage 1, etc.
+num_stages = 5
+for stage in range(1, num_stages + 1):
+    filename = f"stage{stage}_weights.pkl"
+    try:
+        with open(filename, "rb") as f:
+            weights = pickle.load(f)
+        all_saved_weights.append(weights)
+        print(f"Loaded weights for stage {stage} from {filename}.")
+    except FileNotFoundError:
+        print(f"Could not find {filename}. Using empty weights for stage {stage}.")
+        empty_weights = [defaultdict(float) for _ in patterns]
+        all_saved_weights.append(empty_weights)
 
-    # Store them globally
-    all_saved_weights = loaded_weights
-
-    # Create one global approximator. By default, we load stage 1's weights.
-    approximator = NTupleApproximator(board_size=4, patterns=patterns)
-    approximator.weights = all_saved_weights[0]
-
-# ------------------------------
-# Rollout and Simulation
-# ------------------------------
 def rollout_td(sim_env, approximator, rollout_depth=5, gamma=0.99):
     """
     Rollout from the current simulation environment using a TD (greedy) policy.
-    At each step, for each legal action, compute its afterstate and pick the 
-    best (reward + gamma * value).
+    At each step, for each legal action, compute its afterstate (using get_afterstate)
+    to obtain the immediate reward and the approximator's estimated value.
+    If the afterstate indicates a stage transition, use the corresponding weights.
+    Select the action that yields the highest (immediate reward + discounted value),
+    execute it via sim_env.step (which applies the random tile addition), and accumulate
+    the discounted reward.
     """
     total_rollout = 0.0
     discount = 1.0
@@ -394,11 +369,7 @@ def rollout_td(sim_env, approximator, rollout_depth=5, gamma=0.99):
             immediate_reward = score_after - sim_env.score
             new_stage = get_current_stage(board_after, max_stage=100)
             if new_stage != current_stage:
-                # Use the stage-appropriate weights for value estimation
-                temp_approx = NTupleApproximator(
-                    sim_env.board.shape[0], patterns,
-                    weights=all_saved_weights[new_stage - 1]
-                )
+                temp_approx = NTupleApproximator(sim_env.board.shape[0], patterns, weights=all_saved_weights[new_stage - 1])
                 value_est = immediate_reward + gamma * temp_approx.value(board_after)
             else:
                 value_est = immediate_reward + gamma * approximator.value(board_after)
@@ -433,37 +404,37 @@ def simulate_action(action, env, approximator, rollout_depth=5, gamma=0.99, num_
         rewards.append(immediate_reward + rollout_reward)
     return np.mean(rewards)
 
-init_model()
-
-# ------------------------------
-# Main decision function (per TA suggestion)
-# ------------------------------
 def get_action(state, score):
     """
-    Given the current state (board) and score, select an action using your 
-    TD + MCTS/rollout approach. If you wish, you can do gc.collect() here as well.
+    Given the current state (board) and score, select an action using TD-MCTS simulation.
+    This function creates a temporary environment, sets its board and score,
+    runs multiple simulations for each legal move using simulate_action,
+    and returns the action with the highest estimated return.
     """
-    global approximator, all_saved_weights
-    gc.collect()  # Optionally do garbage collection each time
-
     # Create a temporary environment with the given state and score.
     env = Game2048Env()
     env.board = np.copy(state)
     env.score = score
-
-    # If no legal moves, pick something random as fallback
+    
+    # Initialize the approximator with stage 1 weights.
+    approximator = NTupleApproximator(board_size=4, patterns=patterns)
+    approximator.weights = all_saved_weights[0]
+    
     legal_actions = [a for a in range(4) if env.is_move_legal(a)]
     if not legal_actions:
         return random.choice([0, 1, 2, 3])
     
-    # Evaluate each legal action via simulation
     action_values = {}
     for action in legal_actions:
-        value_estimate = simulate_action(action, env, approximator,
-                                         rollout_depth=5, gamma=0.99,
-                                         num_simulations=20)
+        value_estimate = simulate_action(action, env, approximator, rollout_depth=5, gamma=0.99, num_simulations=20)
         action_values[action] = value_estimate
-
-    # Return the action with the highest estimated return
     best_action = max(action_values, key=action_values.get)
+    print(True)
     return best_action
+
+# ------------------------------
+# Random agent for baseline (if needed)
+# ------------------------------
+
+def get_action_random(state, score):
+    return random.choice([0, 1, 2, 3])
