@@ -411,6 +411,8 @@ def get_action(state, score):
     runs multiple simulations for each legal move using simulate_action,
     and returns the action with the highest estimated return.
     """
+    if score == 0 and np.count_nonzero(state)<=2:
+        print("play")
     # Create a temporary environment with the given state and score.
     env = Game2048Env()
     env.board = np.copy(state)
@@ -429,7 +431,6 @@ def get_action(state, score):
         value_estimate = simulate_action(action, env, approximator, rollout_depth=5, gamma=0.99, num_simulations=20)
         action_values[action] = value_estimate
     best_action = max(action_values, key=action_values.get)
-    print(True)
     return best_action
 
 # ------------------------------
