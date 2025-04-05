@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 import gym
 from gym import spaces
+import gc  # for memory cleanup
 
 # ------------------------------
 # Game2048 Environment
@@ -229,7 +230,13 @@ def get_afterstate(env, action):
 
 def get_current_stage(board, max_stage=100):
     """
-    Determine stage based on maximum tile.
+    Returns the current stage based on the board's maximum tile and the presence of a 1024 tile.
+    Stages are defined as:
+      Stage 1: max tile < 1024.
+      Stage 2: 1024 ≤ max tile < 2048.
+      Stage 3: 2048 ≤ max tile < 4096 and NO 1024 tile present.
+      Stage 4: 2048 ≤ max tile < 4096 and a 1024 tile is present.
+      Stage 5: max tile ≥ 4096.
     """
     max_tile = np.max(board)
     if max_tile < 1024:
@@ -241,9 +248,18 @@ def get_current_stage(board, max_stage=100):
             return 4
         else:
             return 3
+    elif max_tile < 8192:
+        if np.any(board == 2048):
+            if np.any(board == 1024):
+                return 8
+            else:
+                return 7
+        elif np.any(board == 1024):
+            return 6
+        else:
+            return 5
     else:
-        return 5
-
+        return 8
 
 # --- NTupleApproximator ---
 class NTupleApproximator:
@@ -253,7 +269,6 @@ class NTupleApproximator:
         if weights is not None:
             self.weights = weights  # a list of dicts for each pattern
         else:
-            from collections import defaultdict
             self.weights = [defaultdict(float) for _ in patterns]
 
         # Precompute symmetry transformations for each pattern.
@@ -325,10 +340,13 @@ patterns = [
     [(0,0), (0,1), (0,2), (1,0), (1,1), (1,2)],
     [(1,0), (1,1), (1,2), (2,0), (2,1), (2,2)]
 ]
-print("start")
-# Load stage weights for stages 1–5
+
+# Global approximator variable
+approximator = None
+
+# Load stage weights for stages 1–8
 all_saved_weights = []  # all_saved_weights[0] corresponds to stage 1, etc.
-num_stages = 5
+num_stages = 8
 for stage in range(1, num_stages + 1):
     filename = f"stage{stage}_weights.pkl"
     try:
@@ -341,15 +359,30 @@ for stage in range(1, num_stages + 1):
         empty_weights = [defaultdict(float) for _ in patterns]
         all_saved_weights.append(empty_weights)
 
-def rollout_td(sim_env, approximator, rollout_depth=5, gamma=0.99):
+# ------------------------------
+# Global Model Initialization (TA Suggestion)
+# ------------------------------
+
+def init_model():
+    """
+    Initialize the global approximator model. Uses gc.collect() for memory cleanup.
+    """
+    global approximator
+    if approximator is None:
+        gc.collect() 
+        approximator = NTupleApproximator(board_size=4, patterns=patterns)
+        # Initialize with stage 1 weights
+        approximator.weights = all_saved_weights[0]
+
+# ------------------------------
+# TD & Afterstate Simulation Functions
+# ------------------------------
+
+def rollout_td(sim_env, approximator_local, rollout_depth=5, gamma=0.99):
     """
     Rollout from the current simulation environment using a TD (greedy) policy.
-    At each step, for each legal action, compute its afterstate (using get_afterstate)
-    to obtain the immediate reward and the approximator's estimated value.
+    At each step, for each legal action, compute its afterstate to obtain the immediate reward and the approximator's estimated value.
     If the afterstate indicates a stage transition, use the corresponding weights.
-    Select the action that yields the highest (immediate reward + discounted value),
-    execute it via sim_env.step (which applies the random tile addition), and accumulate
-    the discounted reward.
     """
     total_rollout = 0.0
     discount = 1.0
@@ -372,7 +405,7 @@ def rollout_td(sim_env, approximator, rollout_depth=5, gamma=0.99):
                 temp_approx = NTupleApproximator(sim_env.board.shape[0], patterns, weights=all_saved_weights[new_stage - 1])
                 value_est = immediate_reward + gamma * temp_approx.value(board_after)
             else:
-                value_est = immediate_reward + gamma * approximator.value(board_after)
+                value_est = immediate_reward + gamma * approximator_local.value(board_after)
             if value_est > best_estimate:
                 best_estimate = value_est
                 best_action = action
@@ -386,10 +419,10 @@ def rollout_td(sim_env, approximator, rollout_depth=5, gamma=0.99):
         current_stage = get_current_stage(sim_env.board, max_stage=100)
     
     if not sim_env.is_game_over():
-        total_rollout += discount * approximator.value(sim_env.board)
+        total_rollout += discount * approximator_local.value(sim_env.board)
     return total_rollout
 
-def simulate_action(action, env, approximator, rollout_depth=5, gamma=0.99, num_simulations=20):
+def simulate_action(action, env, approximator_local, rollout_depth=5, gamma=0.99, num_simulations=20):
     """
     For a given action from the current state, simulate multiple playouts using rollout_td.
     Return the average return (immediate reward plus rollout reward).
@@ -400,25 +433,37 @@ def simulate_action(action, env, approximator, rollout_depth=5, gamma=0.99, num_
         prev_score = sim_env.score
         sim_env.step(action)
         immediate_reward = sim_env.score - prev_score
-        rollout_reward = rollout_td(sim_env, approximator, rollout_depth, gamma)
+        rollout_reward = rollout_td(sim_env, approximator_local, rollout_depth, gamma)
         rewards.append(immediate_reward + rollout_reward)
     return np.mean(rewards)
+
+# ------------------------------
+# get_action Function (Called by eval.py)
+# ------------------------------
 
 def get_action(state, score):
     """
     Given the current state (board) and score, select an action using TD-MCTS simulation.
     This function creates a temporary environment, sets its board and score,
-    runs multiple simulations for each legal move using simulate_action,
-    and returns the action with the highest estimated return.
+    and uses the global approximator model.
     """
+    global approximator
+    # Ensure the global model is initialized (also cleans memory if needed)
+    if approximator is None:
+        init_model()
+    
+    # Perform memory cleanup only at the start of the game: score is 0 and only 2 tiles are present.
+    if score == 0 and np.count_nonzero(state) == 2:
+        gc.collect()
+    
     # Create a temporary environment with the given state and score.
     env = Game2048Env()
     env.board = np.copy(state)
     env.score = score
+    print(env.board)
     
-    # Initialize the approximator with stage 1 weights.
-    approximator = NTupleApproximator(board_size=4, patterns=patterns)
-    approximator.weights = all_saved_weights[0]
+    # Use the global approximator (assumed to be stage 1 weights initially)
+    approximator_local = approximator
     
     legal_actions = [a for a in range(4) if env.is_move_legal(a)]
     if not legal_actions:
@@ -426,15 +471,26 @@ def get_action(state, score):
     
     action_values = {}
     for action in legal_actions:
-        value_estimate = simulate_action(action, env, approximator, rollout_depth=5, gamma=0.99, num_simulations=10)
+        value_estimate = simulate_action(
+            action, env, approximator_local, rollout_depth=5, gamma=1, num_simulations=20
+        )
         action_values[action] = value_estimate
     best_action = max(action_values, key=action_values.get)
-    print(best_action)
     return best_action
 
-# ------------------------------
-# Random agent for baseline (if needed)
-# ------------------------------
 
-def get_action_random(state, score):
-    return random.choice([0, 1, 2, 3])
+# ------------------------------
+# Main Function for Testing (Not used in eval.py)
+# ------------------------------
+def main():
+    init_model()  # Initialize the global approximator once per game
+    env = Game2048Env()
+    env.reset() 
+    while not env.is_game_over():
+        action = get_action(env.board, env.score)
+        env.step(action)
+        print(env.board)
+    print("Final score:", env.score)
+    
+if __name__ == '__main__':
+    main()
