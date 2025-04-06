@@ -460,7 +460,7 @@ def get_action(state, score):
     env = Game2048Env()
     env.board = np.copy(state)
     env.score = score
-    #print(env.board)
+    print(env.board)
     
     # Use the global approximator (assumed to be stage 1 weights initially)
     approximator_local = approximator
