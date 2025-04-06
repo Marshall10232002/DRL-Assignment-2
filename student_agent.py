@@ -460,6 +460,7 @@ def get_action(state, score):
     # Create a temporary environment with the given state and score.
     env = Game2048Env()
     env.board = np.copy(state)
+    print(env.board)
     env.score = score
     
     # Use the global approximator (assumed to be stage 1 weights initially)
