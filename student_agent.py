@@ -454,13 +454,13 @@ def get_action(state, score):
     
     # Perform memory cleanup only at the start of the game: score is 0 and only 2 tiles are present.
     if score == 0 and np.count_nonzero(state) == 2:
+        print("start")
         gc.collect()
     
     # Create a temporary environment with the given state and score.
     env = Game2048Env()
     env.board = np.copy(state)
     env.score = score
-    print(env.board)
     
     # Use the global approximator (assumed to be stage 1 weights initially)
     approximator_local = approximator
