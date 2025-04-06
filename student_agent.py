@@ -460,7 +460,7 @@ def get_action(state, score):
     env = Game2048Env()
     env.board = np.copy(state)
     env.score = score
-    print(env.board)
+    #print(env.board)
     
     # Use the global approximator (assumed to be stage 1 weights initially)
     approximator_local = approximator
@@ -472,7 +472,7 @@ def get_action(state, score):
     action_values = {}
     for action in legal_actions:
         value_estimate = simulate_action(
-            action, env, approximator_local, rollout_depth=5, gamma=1, num_simulations=20
+            action, env, approximator_local, rollout_depth=2, gamma=1, num_simulations=5
         )
         action_values[action] = value_estimate
     best_action = max(action_values, key=action_values.get)
