@@ -239,27 +239,13 @@ def get_current_stage(board, max_stage=100):
       Stage 5: max tile ≥ 4096.
     """
     max_tile = np.max(board)
-    if max_tile < 1024:
+    if max_tile < 4096:
         return 1
-    elif max_tile < 2048:
+    elif max_tile<8192:
         return 2
-    elif max_tile < 4096:
-        if np.any(board == 1024):
-            return 4
-        else:
-            return 3
-    elif max_tile < 8192:
-        if np.any(board == 2048):
-            if np.any(board == 1024):
-                return 8
-            else:
-                return 7
-        elif np.any(board == 1024):
-            return 6
-        else:
-            return 5
     else:
-        return 8
+        return 3
+    
 
 # --- NTupleApproximator ---
 class NTupleApproximator:
@@ -330,23 +316,26 @@ class NTupleApproximator:
 
 # Define your n-tuple patterns
 patterns = [
-    [(0,0), (1,0), (2,0), (3,0)],
-    [(1,0), (1,1), (1,2), (1,3)],
-    [(0,0), (0,1), (0,1), (1,1)],
-    [(1,0), (1,1), (2,0), (2,1)],
-    [(1,1), (1,2), (2,1), (2,2)],
-    [(0,0), (0,1), (0,2), (0,3), (1,0), (1,1)],
-    [(1,0), (1,1), (1,2), (1,3), (2,0), (2,1)],
-    [(0,0), (0,1), (0,2), (1,0), (1,1), (1,2)],
-    [(1,0), (1,1), (1,2), (2,0), (2,1), (2,2)]
-]
+        [(0, 0), (0, 1), (0, 2), (0, 3), (1, 0), (1, 1)],
+        [(1, 0), (1, 1), (1, 2), (1, 3), (2, 0), (2, 1)],
+        [(0, 0), (0, 1), (0, 2), (1, 0), (1, 1), (1, 2)],
+        [(1, 0), (1, 1), (1, 2), (2, 0), (2, 1), (2, 2)],
+        [(0,0), (0,1),
+        (1,0), (1,1)],
+        [(1,0), (1,1),
+        (2,0), (2,1)],
+        [(1,1), (1,2),
+        (2,1), (2,2)],
+        [(0, 0), (1, 0), (2, 0), (3, 0)],
+        [(1, 0), (1, 1), (1, 2), (1, 3)]
+    ]
 
 # Global approximator variable
 approximator = None
 
 # Load stage weights for stages 1–8
 all_saved_weights = []  # all_saved_weights[0] corresponds to stage 1, etc.
-num_stages = 8
+num_stages = 3
 for stage in range(1, num_stages + 1):
     filename = f"stage{stage}_weights.pkl"
     try:
@@ -358,7 +347,6 @@ for stage in range(1, num_stages + 1):
         print(f"Could not find {filename}. Using empty weights for stage {stage}.")
         empty_weights = [defaultdict(float) for _ in patterns]
         all_saved_weights.append(empty_weights)
-
 # ------------------------------
 # Global Model Initialization (TA Suggestion)
 # ------------------------------
@@ -412,6 +400,7 @@ def rollout_td(sim_env, approximator_local, rollout_depth=5, gamma=0.99):
         
         prev_score = sim_env.score
         sim_env.step(best_action)
+        board_after_best, score_after_best, _ = get_afterstate(sim_env, best_action)
         r = sim_env.score - prev_score
         total_rollout += discount * r
         discount *= gamma
@@ -419,7 +408,7 @@ def rollout_td(sim_env, approximator_local, rollout_depth=5, gamma=0.99):
         current_stage = get_current_stage(sim_env.board, max_stage=100)
     
     if not sim_env.is_game_over():
-        total_rollout += discount * approximator_local.value(sim_env.board)
+        total_rollout += discount * approximator_local.value(board_after_best)
     return total_rollout
 
 def simulate_action(action, env, approximator_local, rollout_depth=5, gamma=0.99, num_simulations=20):
@@ -473,7 +462,7 @@ def get_action(state, score):
     action_values = {}
     for action in legal_actions:
         value_estimate = simulate_action(
-            action, env, approximator_local, rollout_depth=2, gamma=1, num_simulations=5
+            action, env, approximator_local, rollout_depth=5, gamma=1, num_simulations=20
         )
         action_values[action] = value_estimate
     best_action = max(action_values, key=action_values.get)
@@ -490,7 +479,7 @@ def main():
     while not env.is_game_over():
         action = get_action(env.board, env.score)
         env.step(action)
-        print(env.board)
+        #print(env.board)
     print("Final score:", env.score)
     
 if __name__ == '__main__':
